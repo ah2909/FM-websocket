@@ -216,7 +216,6 @@ router.post("/cex/transaction", async (req, res) => {
             allTransactions = allTransactions.concat(transactions);
         })
         allTransactions.sort((a, b) => a.timestamp - b.timestamp);
-        
 		res.json({ success: true, data: allTransactions });
 	} catch (error) {
         console.error("Error in /cex/transaction route:", error);
@@ -368,6 +367,17 @@ router.post('/cex/validate', async (req, res) => {
         }
         return res.status(500).json({ success: false, error: error.message || 'An error occurred while validating the API key' });
     }
+});
+
+router.post('/emit-event', (req, res) => {
+    const { event, data, userId } = req.body;
+    console.log("Emit event:", event, data, userId);
+    if (!event || !data || !userId) {
+        return res.status(400).json({ success: false, error: 'Event not in right format' });
+    }
+    const room = userId.toString();
+    io.to(room).emit(event, data);
+    res.json({ success: true });
 });
 
 
