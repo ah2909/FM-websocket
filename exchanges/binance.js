@@ -19,9 +19,13 @@ class BinanceWS extends EventEmitter {
                 this.emit(eventType, message.data);
             }
         });
+    }
 
-        this.ws.on('open', () => console.log('Connected to Binance WS'));
-        this.ws.on('error', (err) => console.error('Binance WS Error:', err));
+    close() {
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
     }
 }
 

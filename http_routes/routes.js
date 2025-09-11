@@ -203,7 +203,7 @@ router.post("/cex/transaction", async (req, res) => {
 					results[name] = transaction;
 				} catch (error) {
                     console.error(`Error fetching trades for ${name}:`, error.message);
-					results[name] = [{ error: error.message }];
+					results[name] = [];
 				}
 			})
 		);
@@ -294,7 +294,7 @@ router.post("/cex/sync-transactions", async (req, res) => {
                     trades = await Promise.allSettled(trades);
                     allTrades[name] = trades.map((trade) => trade.value ?? []).flat();
                 } catch (error) {
-                    console.error(`Error fetching trades for ${name}:`, error.message);
+                    console.error(`Error syncing trades for ${name}:`, error.message);
                     allTrades[name] = [];
                 }
             })
@@ -312,6 +312,7 @@ router.post("/cex/sync-transactions", async (req, res) => {
 		res.json({ success: true, data: allTransactions });
     } catch (error) {
         io.to(room).emit("sync-transactions", {status: "error"});
+        console.error("Error in /cex/sync-transactions route:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -324,6 +325,7 @@ router.post("/cex/update-portfolio", async (req, res) => {
         res.json({ success: status });
     } catch (error) {
         io.to(room).emit("update-portfolio", { success: false });
+        console.error("Error in /cex/update-portfolio route:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
