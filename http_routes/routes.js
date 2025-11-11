@@ -307,7 +307,7 @@ router.post("/cex/sync-transactions", async (req, res) => {
             });
             allTransactions = allTransactions.concat(transactions);
         })
-        allTransactions.sort((a, b) => b.timestamp - a.timestamp);
+        allTransactions.sort((a, b) => a.timestamp - b.timestamp);
         io.to(room).emit("sync-transactions", {status: "success", data: allTransactions});
 		res.json({ success: true, data: allTransactions });
     } catch (error) {
