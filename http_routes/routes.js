@@ -138,14 +138,14 @@ router.post("/cex/portfolio", async (req, res) => {
 		const exchanges = await ExchangeManager.getExchanges(requestedExchanges, body.credentials);
         const results = {};
         // handle multiple exchanges
-		await Promise.all(
+		await Promise.allSettled(
 			Object.entries(exchanges).map(async ([name, exchange]) => {
 				try {
 					let balance = await exchange.fetchBalance({omitZeroBalances: true});
 					results[name] = balance;
 				} catch (error) {
                     console.log(`Error fetching balance for ${name}:`, error.message);
-					results[name] = { error: error.message };
+					results[name] = [];
 				}
 			})
 		);
@@ -276,9 +276,9 @@ router.post("/cex/sync-transactions", async (req, res) => {
         }
 
         const formatTimestamp = (timestamp) => {
-            // Convert string to number if needed
-            const date = new Date(timestamp);
-            return date.getTime();
+            const date = new Date(timestamp).getTime();
+            if (date.toString().length === 10) return date * 1000; // convert to milliseconds
+            return date;
         };
 
         const requestedExchanges = body.exchanges || [];
@@ -286,12 +286,12 @@ router.post("/cex/sync-transactions", async (req, res) => {
         const symbols = body.symbols;
         const allTrades = {};
         
-        await Promise.all(
+        await Promise.allSettled(
             Object.entries(exchanges).map(async ([name, exchange]) => {
                 try {
                     const formattedSince = formatTimestamp(body.since);
                     let trades = symbols.map(symbol => exchange.fetchMyTrades(symbol, formattedSince));
-                    trades = await Promise.allSettled(trades);
+                    trades = await Promise.all(trades);
                     allTrades[name] = trades.map((trade) => trade.value ?? []).flat();
                 } catch (error) {
                     console.error(`Error syncing trades for ${name}:`, error.message);
