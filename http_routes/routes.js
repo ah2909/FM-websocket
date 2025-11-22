@@ -291,7 +291,7 @@ router.post("/cex/sync-transactions", async (req, res) => {
                 try {
                     const formattedSince = formatTimestamp(body.since);
                     let trades = symbols.map(symbol => exchange.fetchMyTrades(symbol, formattedSince));
-                    trades = await Promise.all(trades);
+                    trades = await Promise.allSettled(trades);
                     allTrades[name] = trades.map((trade) => trade.value ?? []).flat();
                 } catch (error) {
                     console.error(`Error syncing trades for ${name}:`, error.message);
