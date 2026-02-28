@@ -382,5 +382,44 @@ router.post('/emit-event', (req, res) => {
     res.json({ success: true });
 });
 
+/**
+ * Get OHLCV (candlestick) data
+ * @route GET /api/cex/ohlcv
+ * @query {string} symbol - Required trading pair symbol (e.g., "BTC/USDT")
+ * @query {string} timeframe - Optional timeframe (default "1h")
+ * @query {number} limit - Optional limit (default 100)
+ * @query {string} exchange - Optional exchange name (default "binance")
+ */
+router.get("/cex/ohlcv", async (req, res) => {
+    try {
+        const { symbol, timeframe = '1h', limit = 100, exchange = 'binance' } = req.query;
+
+        if (!symbol) {
+            return res.status(400).json({ 
+                success: false, 
+                error: "Symbol is required" 
+            });
+        }
+
+        const exchanges = await ExchangeManager.getExchanges([exchange]);
+        const exchangeInstance = exchanges[exchange];
+        
+        // Ensure the exchange supports fetchOHLCV
+        if (!exchangeInstance.has['fetchOHLCV']) {
+             return res.status(400).json({ 
+                success: false, 
+                error: `Exchange ${exchange} does not support fetchOHLCV` 
+            });
+        }
+
+        const ohlcv = await exchangeInstance.fetchOHLCV(symbol, timeframe, undefined, parseInt(limit));
+        
+        res.json({ success: true, data: ohlcv });
+    } catch (error) {
+        console.error("Error in /cex/ohlcv route:", error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 
 export default router;
