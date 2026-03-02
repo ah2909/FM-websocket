@@ -1,8 +1,9 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import BinanceWS from './exchanges/binance.js';
+import binanceManager from './exchanges/binance.js';
 import router from './http_routes/routes.js';
+import { authMiddleware } from './middleware/auth.js';
 
 const PORT = 3003;
 
@@ -11,56 +12,134 @@ app.use(express.json());
 app.use('/api', router);
 
 const server = createServer(app);
-export const io = new Server(server, { 
-    cors: { 
-        origin: '*' 
-    } 
+export const io = new Server(server, {
+    cors: {
+        origin: '*'
+    }
 });
 
-function throttle(func, delay) {
-  let lastCall = 0;
-  return function (...args) {
-    const now = Date.now();
-    if (now - lastCall >= delay) {
-      lastCall = now;
-      return func(...args);
+/**
+ * Parses a Binance stream path into individual stream names.
+ *
+ * Handles:
+ *   "/stream?streams=btcusdt@ticker/ethusdt@ticker"  → ['btcusdt@ticker', 'ethusdt@ticker']
+ *   "/ws/btcusdt@ticker"                             → ['btcusdt@ticker']
+ *   "btcusdt@ticker"                                 → ['btcusdt@ticker']
+ */
+function parseStreams(path) {
+    if (path.includes('?streams=')) {
+        return path.split('?streams=')[1].split('/').filter(Boolean);
     }
-  };
+    if (path.startsWith('/ws/')) return [path.slice(4)];
+    return [path];
 }
+
+/**
+ * Returns a throttle function keyed by an arbitrary string key.
+ * Each unique key has its own independent timer, so one user's
+ * BTC data does not suppress another user's ETH data.
+ */
+function makeThrottle(delay) {
+    const lastCall = new Map();
+    return function (key, fn) {
+        const now = Date.now();
+        if ((now - (lastCall.get(key) ?? 0)) >= delay) {
+            lastCall.set(key, now);
+            fn();
+        }
+    };
+}
+
+const throttle = makeThrottle(5000);
+
+io.use(authMiddleware);
 
 // Handle client connections
 io.on('connection', (socket) => {
-  const user_id = socket.handshake.auth.token;
-  socket.join(user_id);
-  console.log('Total connected clients:', io.engine.clientsCount);
+    const user_id = socket.data.user.id.toString();
+    socket.join(user_id);
+    console.log('Total connected clients:', io.engine.clientsCount);
 
-  const userStreams = new Map();
+    // Individual stream names this socket is subscribed to
+    const socketStreams = new Set();
 
-  socket.on('subscribe', (stream) => {
-    const binanceWS = new BinanceWS(stream);
-    binanceWS.connect();
+    // Per-socket listener references — required for precise EventEmitter.off() cleanup
+    const binanceListeners = new Map();
 
-    userStreams.set(stream, binanceWS);
+    socket.on('subscribe', async (path) => {
+        // Filter out streams this socket is already subscribed to (idempotent)
+        const newStreams = parseStreams(path).filter(s => !socketStreams.has(s));
+        if (newStreams.length === 0) return;
 
-    binanceWS.on('ticker', throttle((data) => {
-      io.to(user_id).emit(`ticker`, data);
-    }, 5000));
-  });
+        try {
+            // One batch SUBSCRIBE message to Binance for all new streams
+            await binanceManager.subscribeMany(newStreams);
 
-  socket.on('unsubscribe', (stream) => {
-    userStreams.delete(stream);
-  });
+            for (const stream of newStreams) {
+                socketStreams.add(stream);
 
-  socket.on('disconnect', () => {
-    for (const [stream, binanceWS] of userStreams.entries()) {
-      binanceWS.close();
-    }
-    userStreams.clear();
-  });
+                const listener = (eventType, data) => {
+                    throttle(`${user_id}:${stream}`, () => {
+                        io.to(user_id).emit('ticker', data);
+                    });
+                };
+
+                binanceListeners.set(stream, listener);
+                binanceManager.on(stream, listener);
+            }
+        } catch (err) {
+            console.error('[server] Failed to subscribe:', err.message);
+            socket.emit('error', { message: 'Failed to subscribe to streams' });
+        }
+    });
+
+    socket.on('unsubscribe', async (path) => {
+        const streams = parseStreams(path).filter(s => socketStreams.has(s));
+        if (streams.length === 0) return;
+
+        // Remove listeners first, synchronously
+        for (const stream of streams) {
+            socketStreams.delete(stream);
+            const listener = binanceListeners.get(stream);
+            if (listener) {
+                binanceManager.off(stream, listener);
+                binanceListeners.delete(stream);
+            }
+        }
+
+        try {
+            // One batch UNSUBSCRIBE message to Binance for all removed streams
+            await binanceManager.unsubscribeMany(streams);
+        } catch (err) {
+            console.error('[server] Failed to unsubscribe:', err.message);
+        }
+    });
+
+    socket.on('disconnect', async () => {
+        const streams = [...socketStreams];
+
+        // Remove all listeners synchronously first
+        for (const stream of streams) {
+            const listener = binanceListeners.get(stream);
+            if (listener) binanceManager.off(stream, listener);
+        }
+        binanceListeners.clear();
+        socketStreams.clear();
+
+        try {
+            // One batch UNSUBSCRIBE for all streams this socket held
+            await binanceManager.unsubscribeMany(streams);
+        } catch (err) {
+            console.error('[server] Failed to unsubscribe on disconnect:', err.message);
+        }
+    });
 });
 
-
+process.on('SIGTERM', () => {
+    binanceManager.destroy();
+    server.close(() => process.exit(0));
+});
 
 server.listen(PORT, () => {
-  console.log(`Websocket server listening on port ${PORT}`);
+    console.log(`Websocket server listening on port ${PORT}`);
 });
