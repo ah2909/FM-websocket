@@ -50,7 +50,7 @@ function makeThrottle(delay) {
     };
 }
 
-const throttle = makeThrottle(5000);
+const throttle = makeThrottle(10000);
 
 io.use(authMiddleware);
 

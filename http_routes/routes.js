@@ -141,6 +141,7 @@ router.post("/cex/portfolio", async (req, res) => {
 		await Promise.allSettled(
 			Object.entries(exchanges).map(async ([name, exchange]) => {
 				try {
+                    // Just get SPOT account balance
 					let balance = await exchange.fetchBalance({omitZeroBalances: true});
 					results[name] = balance;
 				} catch (error) {
@@ -313,6 +314,91 @@ router.post("/cex/sync-transactions", async (req, res) => {
     } catch (error) {
         io.to(room).emit("sync-transactions", {status: "error"});
         console.error("Error in /cex/sync-transactions route:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * Fetch deposit and withdrawal history per currency since a timestamp
+ * @route POST /api/cex/sync-deposits-withdrawals
+ * @request_body {string} since        - Timestamp/ISO date from which to fetch
+ * @request_body {string[]} exchanges  - Array of exchange names
+ * @request_body {string[]} currencies - Bare currency codes (e.g. ['BTC', 'ETH'])
+ * @request_body {number} user_id      - User ID
+ * @request_body {object} credentials  - API credentials keyed by exchange name
+ */
+router.post("/cex/sync-deposits-withdrawals", async (req, res) => {
+    try {
+        const body = req.body;
+
+        if (!body.credentials) {
+            return res.status(400).json({ success: false, error: "API credentials are required" });
+        }
+        if (!body.since) {
+            return res.status(400).json({ success: false, error: "'since' is required." });
+        }
+        if (!body.currencies || !Array.isArray(body.currencies) || body.currencies.length === 0) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const formatTimestamp = (timestamp) => {
+            const date = new Date(timestamp).getTime();
+            if (date.toString().length === 10) return date * 1000;
+            return date;
+        };
+
+        const formattedSince = formatTimestamp(body.since);
+        const requestedExchanges = body.exchanges || [];
+        const exchanges = await ExchangeManager.getExchanges(requestedExchanges, body.credentials);
+        const currencies = body.currencies;
+
+        let allMovements = [];
+
+        await Promise.allSettled(
+            Object.entries(exchanges).map(async ([name, exchange]) => {
+                const supportsDeposits    = exchange.has['fetchDeposits'];
+                const supportsWithdrawals = exchange.has['fetchWithdrawals'];
+
+                try {
+                    const depositPromises = supportsDeposits
+                        ? currencies.map(currency =>
+                            exchange.fetchDeposits(currency, formattedSince)
+                                .then(results => results.map(r => ({ ...r, exchange: name, type: 'deposit' })))
+                                .catch(() => [])
+                          )
+                        : [];
+
+                    const withdrawalPromises = supportsWithdrawals
+                        ? currencies.map(currency =>
+                            exchange.fetchWithdrawals(currency, formattedSince)
+                                .then(results => results.map(r => ({ ...r, exchange: name, type: 'withdrawal' })))
+                                .catch(() => [])
+                          )
+                        : [];
+
+                    const [depositResults, withdrawalResults] = await Promise.all([
+                        Promise.allSettled(depositPromises),
+                        Promise.allSettled(withdrawalPromises),
+                    ]);
+
+                    depositResults.forEach(r => { if (r.status === 'fulfilled') allMovements.push(...r.value); });
+                    withdrawalResults.forEach(r => { if (r.status === 'fulfilled') allMovements.push(...r.value); });
+                } catch (error) {
+                    console.error(`Error fetching deposits/withdrawals for ${name}:`, error.message);
+                }
+            })
+        );
+
+        // Only return completed transactions
+        allMovements = allMovements.filter(m => m.status === 'ok');
+        allMovements.sort((a, b) => a.timestamp - b.timestamp);
+        allMovements = allMovements.map(({ currency, amount, type, address, addressTo, exchange, timestamp }) => ({
+            currency, amount, type, address, addressTo, exchange, timestamp
+        }));
+
+        res.json({ success: true, data: allMovements });
+    } catch (error) {
+        console.error("Error in /cex/sync-deposits-withdrawals route:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
