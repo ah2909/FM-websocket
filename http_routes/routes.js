@@ -245,26 +245,22 @@ router.post("/cex/transaction", async (req, res) => {
     }
  */
 router.post("/cex/sync-transactions", async (req, res) => {
-    const room = req.body.user_id.toString();
     try {
         const body = req.body;
         
         if (!body.credentials) {
-            io.to(room).emit("sync-transactions", {status: "error"});
             return res.status(400).json({
                 success: false,
                 error: "API credentials are required"
             });
         }
         if (!body.since) {
-            io.to(room).emit("sync-transactions", {status: "error"});
             return res.status(400).json({
                 success: false,
                 error: "Invalid request body. 'since' must be a number."
             });
         }
         if (!body.symbols || !Array.isArray(body.symbols)) {
-            io.to(room).emit("sync-transactions", {status: "error"});
             return res.status(400).json({
                 success: false,
                 error: "Invalid request body. 'symbols' is required."
@@ -309,10 +305,8 @@ router.post("/cex/sync-transactions", async (req, res) => {
             allTransactions = allTransactions.concat(transactions);
         })
         allTransactions.sort((a, b) => a.timestamp - b.timestamp);
-        io.to(room).emit("sync-transactions", {status: "success", data: allTransactions});
 		res.json({ success: true, data: allTransactions });
     } catch (error) {
-        io.to(room).emit("sync-transactions", {status: "error"});
         console.error("Error in /cex/sync-transactions route:", error);
         res.status(500).json({ success: false, error: error.message });
     }
