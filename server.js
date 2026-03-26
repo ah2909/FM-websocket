@@ -41,13 +41,19 @@ function parseStreams(path) {
  */
 function makeThrottle(delay) {
     const lastCall = new Map();
-    return function (key, fn) {
+    function throttle(key, fn) {
         const now = Date.now();
         if ((now - (lastCall.get(key) ?? 0)) >= delay) {
             lastCall.set(key, now);
             fn();
         }
+    }
+    throttle.deletePrefix = function (prefix) {
+        for (const key of lastCall.keys()) {
+            if (key.startsWith(prefix)) lastCall.delete(key);
+        }
     };
+    return throttle;
 }
 
 const throttle = makeThrottle(10000);
@@ -125,6 +131,7 @@ io.on('connection', (socket) => {
         }
         binanceListeners.clear();
         socketStreams.clear();
+        throttle.deletePrefix(`${user_id}:`);
 
         try {
             // One batch UNSUBSCRIBE for all streams this socket held
