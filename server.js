@@ -11,6 +11,12 @@ const app = express();
 app.use(express.json());
 app.use('/api', router);
 
+if (process.env.NODE_ENV !== 'production') {
+    const { default: swaggerUi } = await import('swagger-ui-express');
+    const { swaggerSpec } = await import('./docs/swagger.js');
+    app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+}
+
 const server = createServer(app);
 export const io = new Server(server, {
     cors: {

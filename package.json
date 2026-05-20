@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon --inspect=0.0.0.0:9229 server.js",
+    "dev": "nodemon server.js",
     "start": "node --max-old-space-size=512 server.js"
   },
   "author": "",
@@ -16,8 +16,15 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "nodemon": "^3.1.10",
     "socket.io": "^4.8.1",
-    "ws": "^8.18.1"
+    "ws": "8.20.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "overrides": {
+    "ws": "8.20.1"
   }
 }
